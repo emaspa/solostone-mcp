@@ -1,0 +1,15 @@
+diff --git a/plugin/OfflineProbe.cs b/plugin/OfflineProbe.cs
+index 7090bee..5eefc08 100644
+--- a/plugin/OfflineProbe.cs
++++ b/plugin/OfflineProbe.cs
+@@ -116,7 +116,9 @@ public sealed class OfflineProbe : BaseUnityPlugin
+         const bool releaseBuild = false;
+         Func<bool> labIsolated = () => deck ? OfflineGuard.IsDeckIsolated(executable, localData, lane)
+             : OfflineGuard.IsIsolated(identity, Environment.MachineName, executable, localData, lane);
+-        Func<bool> inAdminGroup = () => new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
++        // Lab patch (solostone-mcp, never upstream): under Wine every token carries Administrators, as the Deck note in OfflineGuard says.
++        // An installed hook build on the Linux launcher runs in a network namespace, so the account test is skipped there.
++        Func<bool> inAdminGroup = () => !(wine && installed) && new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
+ #endif
+         OfflineGuard.GuardVerdict verdict = OfflineGuard.Judge(releaseBuild, deck, installed, labIsolated, TokenElevation.IsElevated, inAdminGroup);
+         if (verdict.Rejected)

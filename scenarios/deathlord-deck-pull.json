@@ -1,0 +1,51 @@
+{
+ "name": "Deathlord's deathrattle takes the minion out of the opponent's deck (fuzz finding E8-200195fd)",
+ "setup": {
+  "seed": 3,
+  "first": "me",
+  "me": {
+   "class": "SHAMAN",
+   "emptyDeck": true,
+   "deckTop": [
+    {
+     "card": "AT_094",
+     "as": "juggler"
+    }
+   ]
+  },
+  "opp": {
+   "class": "HUNTER",
+   "board": [
+    {
+     "card": "FP1_009",
+     "as": "deathlord"
+    }
+   ]
+  }
+ },
+ "steps": [
+  {
+   "set": "@deathlord",
+   "damage": 20,
+   "expect": [
+    {
+     "entity": "@deathlord",
+     "zone": "GRAVEYARD"
+    },
+    {
+     "entity": "@juggler",
+     "zone": "PLAY",
+     "tags": {
+      "TO_BE_DESTROYED": 0
+     }
+    },
+    {
+     "zone": "me.deck",
+     "hasNot": [
+      "@juggler"
+     ]
+    }
+   ]
+  }
+ ]
+}

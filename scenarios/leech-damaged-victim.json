@@ -1,0 +1,13 @@
+{
+  "name": "Bloated Leech: a damaged victim loses current Health (dies at 0); an undamaged 2-Health victim drops to 1",
+  "setup": {
+    "seed": 5, "first": "me",
+    "me": {"class": "DEATHKNIGHT", "board": [{"card": "EDR_810t", "as": "leech"}]},
+    "opp": {"class": "PALADIN", "board": [{"card": "CS2_120", "as": "croc", "damage": 1}]}
+  },
+  "steps": [
+    {"end_turn": true, "expect": [{"entity": "@croc", "health": 1}]},
+    {"by": "opp", "end_turn": true},
+    {"end_turn": true, "expect": [{"entity": "@croc", "zone": "GRAVEYARD"}, {"entity": "me.hero", "health": 32}]}
+  ]
+}

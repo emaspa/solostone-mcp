@@ -1,0 +1,18 @@
+{
+  "name": "Freezing Trap played on my turn: the attack it cancels next turn is not drawn as a hit",
+  "setup": {
+    "seed": 1, "first": "me",
+    "me": {"class": "HUNTER", "hand": [{"card": "EX1_611", "as": "trap"}], "mana": 2},
+    "opp": {"class": "MAGE", "board": [{"card": "DRG_107", "as": "a"}]}
+  },
+  "steps": [
+    {"play": "@trap", "expect": [{"entity": "@trap", "zone": "SECRET"}]},
+    {"end_turn": true},
+    {"by": "opp", "attack": "@a", "target": "me.hero",
+     "expect": [
+      {"entity": "@a", "zone": "HAND"},
+      {"entity": "me.hero", "damage": 0},
+      {"history": "step", "none": ["ATTACKING=1", "DEFENDING=1"], "order": ["PROPOSED_ATTACKER", "BLOCK TRIGGER src=Freezing Trap", "ZONE=HAND"]}
+    ]}
+  ]
+}

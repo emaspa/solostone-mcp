@@ -1,0 +1,11 @@
+{
+  "name": "Bloated Leech stealing a 1-Health minion's last Health kills it (fuzz finding E4-554ce3de)",
+  "setup": {
+    "seed": 5, "first": "me",
+    "me": {"class": "DEATHKNIGHT", "board": [{"card": "EDR_810t", "as": "leech"}]},
+    "opp": {"class": "PALADIN", "board": [{"card": "CS2_101t", "as": "recruit"}]}
+  },
+  "steps": [
+    {"end_turn": true, "expect": [{"entity": "@recruit", "zone": "GRAVEYARD"}]}
+  ]
+}

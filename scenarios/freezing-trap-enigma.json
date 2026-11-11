@@ -1,0 +1,19 @@
+{
+  "name": "Freezing Trap cast for me on the opponent's turn (Faceless Enigma) is live at once and cancels the attack",
+  "setup": {
+    "seed": 1, "first": "opp",
+    "me": {"class": "HUNTER"},
+    "opp": {"class": "MAGE", "board": [{"card": "DRG_107", "as": "a"}]}
+  },
+  "steps": [
+    {"by": "opp", "cast": "EX1_611", "for": "me", "as": "trap",
+     "expect": [{"entity": "@trap", "zone": "SECRET", "exhausted": false}]},
+    {"by": "opp", "attack": "@a", "target": "me.hero",
+     "expect": [
+      {"entity": "@a", "zone": "HAND"},
+      {"entity": "me.hero", "damage": 0},
+      {"history": "step", "none": ["ATTACKING=1", "DEFENDING=1"]}
+    ]}
+  ],
+  "expect": [{"zone": "me.secret", "count": 0}]
+}
