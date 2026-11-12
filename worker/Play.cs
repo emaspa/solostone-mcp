@@ -424,6 +424,13 @@ namespace SoloStoneMcp
                 ["spellCompletion"] = g.SpellCompletion != null,
                 ["taskQueueEmpty"] = g.TaskQueue.IsEmpty,
                 ["pendingDecisions"] = new JsonArray(g.GetPendingDecisions().Select(d => (JsonNode)d.ToString()).ToArray()),
+                // Every entity's activated trigger: the owner, its zone and the trigger type (private in the engine, read by reflection).
+                ["triggers"] = new JsonArray(g.IdEntityDic.Values.OfType<IPlayable>().Where(e => e.ActivatedTrigger != null).Select(e => {
+                    var tr = e.ActivatedTrigger; var owner = (IEntity)e;
+                    var type = typeof(SabberStoneCore.Triggers.Trigger).GetField("_triggerType", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.GetValue(tr);
+                    return (JsonNode)new JsonObject { ["owner"] = owner is IPlayable p ? Label(p) : owner?.ToString(), ["zone"] = (owner as IPlayable)?.Zone?.Type.ToString(),
+                        ["type"] = type?.ToString(), ["source"] = tr.TriggerSource.ToString() };
+                }).ToArray()),
             };
             return o;
         }

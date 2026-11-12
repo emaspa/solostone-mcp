@@ -105,7 +105,8 @@ namespace SoloStoneMcp
         internal static Card CardOf(string idOrName)
         {
             if (string.IsNullOrEmpty(idOrName)) throw new UserError("empty card id");
-            var c = Cards.FromId(idOrName);
+            Card c = null;
+            try { c = Cards.FromId(idOrName); } catch (KeyNotFoundException) { }  // FromId throws for an unknown id
             if (c != null) return c;
             c = Cards.All.Where(x => string.Equals(x.Name, idOrName, StringComparison.OrdinalIgnoreCase)).OrderByDescending(x => x.Collectible).FirstOrDefault();
             if (c != null) return c;

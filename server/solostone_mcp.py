@@ -138,8 +138,8 @@ SESSIONS = {}  # public id -> (worker, worker session id)
 
 
 def session(sid):
-    if sid is None and len(SESSIONS) == 1:
-        sid = next(iter(SESSIONS))
+    if sid is None and SESSIONS:
+        sid = next(reversed(SESSIONS))  # the newest session
     if sid not in SESSIONS:
         raise ToolError('no session %s; open: %s' % (sid, ', '.join(SESSIONS) or 'none'))
     return SESSIONS[sid]
@@ -186,13 +186,23 @@ def t_card_search(query, limit=15, text=False, collectible=False, worktree=None)
     return worker(worktree).call('cards', query=query, limit=limit, text=text, collectible=collectible)
 
 
-def t_scenario_run(scenario=None, path=None, engines=None, verbose=False, keep=False):
+def grep_steps(steps, grep):
+    if not grep:
+        return steps
+    rx = re.compile(grep, re.I)
+    for st in steps or []:
+        if isinstance(st, dict) and isinstance(st.get('history'), list):
+            st['history'] = [l for l in st['history'] if rx.search(l)]
+    return steps
+
+
+def t_scenario_run(scenario=None, path=None, engines=None, verbose=False, keep=False, grep=None, state=False):
     sc = load_scenario(scenario, path)
     engines = engines or [DEFAULT_ENGINE]
     out = {'name': sc.get('name'), 'results': []}
     for wt in engines:
         w = worker(wt)
-        sc2 = dict(sc, verbose=verbose)
+        sc2 = dict(sc, verbose=verbose or bool(grep))  # the worker drops step history unless verbose
         res = w.call('scenario', scenario=sc2, keep=keep)
         entry = {'engine': w.describe(), 'pass': res['pass'], 'failures': failures(res)}
         if keep and res.get('session'):
@@ -200,8 +210,9 @@ def t_scenario_run(scenario=None, path=None, engines=None, verbose=False, keep=F
             SESSIONS[pid] = (w, res['session'])
             entry['session'] = pid
         if verbose or len(engines) == 1:
-            entry['steps'] = res['steps']
-            entry['state'] = res.get('state')
+            entry['steps'] = grep_steps(res['steps'], grep)
+            if state:
+                entry['state'] = res.get('state')
         out['results'].append(entry)
     if len(engines) > 1:
         out['summary'] = ['%s %s@%s%s' % ('PASS' if r['pass'] else 'FAIL', os.path.basename(r['engine']['worktree']),
@@ -239,10 +250,15 @@ def t_game_options(session=None, by=None):
     return scall(session, 'options', **({'by': by} if by else {}))
 
 
-def t_game_act(steps, session=None):
+def t_game_act(steps, session=None, grep=None, state=True):
     if isinstance(steps, dict):
         steps = [steps]
-    return scall(session, 'act', steps=steps)
+    res = scall(session, 'act', steps=steps)
+    if isinstance(res, dict):
+        grep_steps(res.get('steps'), grep)
+        if not state:
+            res.pop('state', None)
+    return res
 
 
 def t_game_history(session=None, range='step', start=None, end=None, grep=None, limit=300):
@@ -681,8 +697,46 @@ def t_live_call(cmd, args=None, wait=15, until=None):
     return replies[-1] if len(replies) == 1 else {'phases': [r.get('phase') for r in replies], 'final': replies[-1]}
 
 
-def t_live_state():
-    return t_live_call('state')
+def t_live_state(raw=False):
+    r = t_live_call('state')
+    if raw:
+        return r
+    d = data_of(r)
+    e = d.get('engine') or {}
+    def side(p):
+        p = p or {}
+        return {'hp': p.get('health'), 'armor': p.get('armor'), 'mana': p.get('mana'), 'deck': p.get('deckCount'),
+                'hand': [(c.get('id'), c.get('cardId')) for c in p.get('hand', [])] or p.get('handCount'),
+                'board': [(c.get('id'), c.get('cardId')) for c in p.get('board', [])]}
+    return {'scene': d.get('scene'), 'matchId': r.get('matchId') if isinstance(r, dict) else None, 'responseMode': d.get('responseMode'),
+            'optionsId': d.get('humanOptionsId'), 'choiceId': d.get('choiceId'), 'inputEnabled': d.get('inputEnabled'),
+            'step': e.get('step'), 'turn': e.get('turn'), 'current': e.get('currentPlayerId'),
+            'human': side(e.get('human')), 'opponent': side(e.get('opponent')), 'differences': d.get('differences')}
+
+
+def t_live_play(entity=None, target=0, position=0, sub=-1, end_turn=False, settle=6, raw_fx=False):
+    """Plays one option by its source entity (or ends the turn), waits for the client to settle and returns the fx it caused."""
+    rows, cursor = fx_rows(LIVE_FX_CURSOR[0], 100000)
+    LIVE_FX_CURSOR[0] = cursor
+    o = data_of(t_live_options())
+    if end_turn:
+        act = t_live_end_turn(o['optionsId'])
+    else:
+        row = next((x for x in o['rows'] if x['main']['source'] == entity), None)
+        if row is None:
+            raise ToolError('no option with source %s; sources: %s' % (entity, [(x['index'], x['type'], x['main']['source']) for x in o['rows']]))
+        if not position:
+            position = next((p['positions'][0] for p in row['main']['permitted'] if p['target'] == target and p.get('positions')), 0)
+        act = t_live_act(row['index'], o['optionsId'], target=target, sub=sub, position=position)
+    time.sleep(settle)
+    rows, cursor = fx_rows(cursor, 100000)
+    LIVE_FX_CURSOR[0] = cursor
+    fin = data_of(act)
+    return {'phase': (act.get('final') or act).get('phase') if isinstance(act, dict) else None, 'error': (act or {}).get('error'),
+            'fx': rows if raw_fx else [r for r in rows if not fx_noise(r)]}
+
+
+LIVE_FX_CURSOR = [0]
 
 
 def match_id():
@@ -695,7 +749,7 @@ def match_id():
     return mid, st[-1]
 
 
-def t_live_options():
+def t_live_options():  # noqa
     mid, _ = match_id()
     return t_live_call('options', {'matchId': mid})
 
@@ -729,12 +783,51 @@ def t_live_entities(entity_ids):
     return t_live_call('entity', {'matchId': mid, 'entityIds': list(entity_ids)})
 
 
-def t_live_fx(after=0, limit=100):
-    return t_live_call('fx', {'after': after, 'limit': limit})
+FX_KEEP = ['sequence', 'event', 'blockType', 'sourceEntity', 'cardId', 'effectCardId', 'effectIndex', 'subOption', 'triggerKeyword',
+           'controllerType', 'effectPresent', 'prefab', 'spellName', 'stateName', 'result', 'error', 'targets']
 
 
-def t_live_ui(all=False):
-    return t_live_call('ui', {'all': 1} if all else {})
+def fx_rows(after, limit=100):
+    """Telemetry rows after a cursor, parsed from the plugin's TSV, empty fields dropped."""
+    out, last = [], after
+    while True:
+        d = data_of(t_live_call('fx', {'after': last, 'limit': min(limit, 100)}))
+        hdr = d['header'].split('\t')
+        recs = d.get('records') or []
+        for line in recs:
+            v = dict(zip(hdr, line.split('\t')))
+            last = int(v['sequence'])
+            out.append({k: v[k] for k in FX_KEEP if v.get(k) not in (None, 'null', '')})
+        if len(recs) < 100 or len(out) >= limit:
+            return out, last
+
+
+def fx_noise(r):
+    # Spell state churn: keep only activations, which are what the player sees.
+    return r['event'].startswith('Spell.') and r['event'] != 'Spell.ActivateState'
+
+
+def t_live_fx(after=0, limit=100, raw=False):
+    rows, last = fx_rows(after, limit)
+    if not raw:
+        rows = [r for r in rows if not fx_noise(r)]
+    return {'next': last, 'rows': rows}
+
+
+def data_of(reply):
+    if isinstance(reply, dict) and 'final' in reply:
+        reply = reply['final']
+    return reply.get('data', reply) if isinstance(reply, dict) else reply
+
+
+def t_live_ui(all=False, raw=False):
+    r = t_live_call('ui', {'all': 1} if all else {})
+    if raw:
+        return r
+    d = data_of(r)
+    els = [{k: e.get(k) for k in ('id', 'label', 'type')} | ({} if e.get('enabled', True) else {'disabled': True})
+           for e in d.get('elements', []) if all or e.get('hit')]
+    return {'scene': d.get('scene'), 'screen': d.get('screen'), 'idle': d.get('idle'), 'dialogs': d.get('dialogs'), 'elements': els}
 
 
 def t_live_press(element, snapshot=None, timeout_ms=5000):
@@ -847,15 +940,17 @@ TOOLS = [
      S(query=STR, limit=INT, text=BOOL, collectible=BOOL, worktree=WT), ['query']),
     ('scenario_run', t_scenario_run, 'Run a scenario on one or more engine worktrees and report pass/fail per engine. Use it to reproduce a bug '
      '(should FAIL on the buggy engine) and verify a fix (PASS on the fix worktree). keep=true leaves a session open at the end. '
-     'path may name a file in the server\'s scenarios/ folder.\n' + SCENARIO_DOC,
-     S(scenario=OBJ, path=STR, engines=ENGINES, verbose=BOOL, keep=BOOL), []),
+     'path may name a file in the server\'s scenarios/ folder. grep keeps only matching history lines; state=true adds the final board.\n'
+     + SCENARIO_DOC,
+     S(scenario=OBJ, path=STR, engines=ENGINES, verbose=BOOL, keep=BOOL, grep=STR, state=BOOL), []),
     ('game_new', t_game_new, 'Start an engine game from a setup (same shape as a scenario "setup") and keep it as a session.\n' + SCENARIO_DOC,
      S(setup=OBJ, worktree=WT, seed=INT), []),
     ('game_state', t_game_state, 'Board, hands, secrets, mana, pending choice and aliases of a session. full=true adds deck order and graveyard.', S(session=SID, full=BOOL), []),
     ('game_entity', t_game_entity, 'All engine tags, text and enchantments of one entity (ref as in scenarios).', S(ref=STR, session=SID), ['ref']),
     ('game_options', t_game_options, 'The legal options for the player to act (or "by").', S(session=SID, by=STR), []),
-    ('game_act', t_game_act, 'Apply steps (scenario step format) to a session. Each step reports ok/error and the power history it produced.',
-     S(steps={'type': ['array', 'object']}, session=SID), ['steps']),
+    ('game_act', t_game_act, 'Apply steps (scenario step format) to a session (default: the newest). Each step reports ok/error and the power '
+     'history it produced; grep keeps only matching history lines, state=false drops the board.',
+     S(steps={'type': ['array', 'object']}, session=SID, grep=STR, state=BOOL), ['steps']),
     ('game_history', t_game_history, 'Power history lines (what the client would be sent): range "step" (last step) or "full", or start/end indices; grep is a regex.',
      S(session=SID, range=STR, start=INT, end=INT, grep=STR, limit=INT), []),
     ('game_assert', t_game_assert, 'Check expectations (scenario format) against a session now.', S(expect=ARR, session=SID), ['expect']),
@@ -882,7 +977,11 @@ TOOLS = [
      S(match=STR, install=STR, types={'type': 'array', 'items': STR}, grep=STR, turn_from=INT, turn_to=INT, limit=INT, offset=INT), []),
     ('live_connect', t_live_connect, 'Connect to the running game client\'s test-control endpoint (hook builds only). target: lab (Linux lab install, '
      'started with lab.sh play), desk (the user\'s own install, only if it is a hook build), vm (win11 over ssh).', S(target=STR, lane=INT, wait=INT), []),
-    ('live_state', t_live_state, 'Client state: scene, match id, idle, blockers, and "differences" between engine and client (health, hand, board, tags).', S(), []),
+    ('live_state', t_live_state, 'Client state summary: scene, match id, options/choice ids, both sides (hand and board as [id, card]) and '
+     '"differences" between engine and client. raw=true returns the full reply.', S(raw=BOOL), []),
+    ('live_play', t_live_play, 'Play one option in the live match by its source entity id (hand card, hero power, minion attack) with an optional '
+     'target/position/sub, or end_turn=true; waits settle seconds and returns the client spell telemetry it caused (raw_fx keeps state churn).',
+     S(entity=INT, target=INT, position=INT, sub=INT, end_turn=BOOL, settle=INT, raw_fx=BOOL), []),
     ('live_options', t_live_options, 'The client\'s current option packet (optionsId, options with targets and positions).', S(), []),
     ('live_act', t_live_act, 'Send one option through the client\'s own GameState.SendOption (index/target/sub/position from live_options).',
      S(index=INT, options_id=INT, target=INT, sub=INT, position=INT, wait=INT), ['index', 'options_id']),
@@ -890,8 +989,10 @@ TOOLS = [
     ('live_choose', t_live_choose, 'Pick a Discover/choice entity (click=true clicks it in the UI instead).', S(choice_id=INT, entity_id=INT, click=BOOL, wait=INT), ['choice_id', 'entity_id']),
     ('live_wait_idle', t_live_wait_idle, 'Wait until the client finished animating after an action id.', S(after_action_id=STR, timeout_ms=INT), ['after_action_id']),
     ('live_entities', t_live_entities, 'Engine tags, wire projection and client actor state for entity ids.', S(entity_ids={'type': 'array', 'items': INT}), ['entity_ids']),
-    ('live_fx', t_live_fx, 'Client spell/animation telemetry rows after a cursor.', S(after=INT, limit=INT), []),
-    ('live_ui', t_live_ui, 'Menu UI tree with stable element ids (to navigate menus with live_press).', S(all=BOOL), []),
+    ('live_fx', t_live_fx, 'Client spell/animation telemetry rows after a cursor, parsed; next is the cursor to pass on. raw=true keeps spell '
+     'state churn.', S(after=INT, limit=INT, raw=BOOL), []),
+    ('live_ui', t_live_ui, 'Menu UI elements with stable ids (to navigate menus with live_press): hit-testable ones, or all=true. raw=true '
+     'returns the full reply.', S(all=BOOL, raw=BOOL), []),
     ('live_press', t_live_press, 'Press a UI element by id from live_ui.', S(element=STR, snapshot=STR, timeout_ms=INT), ['element']),
     ('live_screenshot', t_live_screenshot, 'Capture the game\'s own rendered frame (in-process Unity capture, not the desktop) and return it as an image.', S(), []),
     ('live_logs', t_live_logs, 'Tail of the client\'s Unity.log or wine.log, optionally filtered by regex.', S(which=STR, lines=INT, grep=STR), []),

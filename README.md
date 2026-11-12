@@ -39,9 +39,13 @@ Findings are saved in `~/.local/state/solostone-mcp/findings/`.
 - **Sessions:** `game_new`, `game_state`, `game_entity`, `game_options`, `game_act`, `game_history`, `game_assert`, `game_diag`, `game_checkpoint`, `game_restore`, `game_close`.
 - **Bug hunting:** `fuzz_run`, `finding_list`, `finding_get`, `finding_set`, `finding_verify`, `finding_replay`.
 - **Match journals** from the desk or lab install (read-only): `journal_list`, `journal_read`.
-- **Live client:** `live_connect`, `live_state`, `live_options`, `live_act`, `live_end_turn`, `live_choose`, `live_wait_idle`, `live_entities`, `live_fx`, `live_ui`, `live_press`, `live_screenshot`, `live_logs`, `live_call`, `live_disconnect`.
+- **Live client:** `live_connect`, `live_state`, `live_options`, `live_play`, `live_act`, `live_end_turn`, `live_choose`, `live_wait_idle`, `live_entities`, `live_fx`, `live_ui`, `live_press`, `live_screenshot`, `live_logs`, `live_call`, `live_disconnect`.
 
 `live_screenshot` returns the frame the game rendered, captured by Unity inside the game process. It never captures the desktop.
+
+`live_play` plays a card, hero power or attack by its entity id and returns the spell telemetry the client logged for it: which controller took the block, which sub-spells loaded and which spell states ran. That shows whether an animation played without watching the screen. The plugin keeps only the last 512 telemetry rows, so read them right after the action.
+
+A debug scenario sets up a live match: write `reports/debug-scenario` with `runId=` (line 1 of `reports/plugin-loaded.txt`) and keys such as `humanHand=`, `npcBoard=`, `humanMana=` and `humanSeat=first` before pressing Play (see `plugin/Npc/DebugScenario.cs` in SoloStone). Cards it adds after the mulligan miss Start of Game, so test those with a deck that holds the card.
 
 The scenario format is described in the `scenario_run` tool description. Examples are in `scenarios/`.
 

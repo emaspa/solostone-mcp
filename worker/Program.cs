@@ -29,12 +29,13 @@ namespace SoloStoneMcp
                     id = req["id"]?.DeepClone();
                     string cmd = (string)req["cmd"];
                     if (cmd == "quit") break;
-                    reply = new JsonObject { ["id"] = id, ["ok"] = true, ["result"] = worker.Handle(cmd, req) };
+                    var result = worker.Handle(cmd, req);
+                    reply = new JsonObject { ["id"] = id?.DeepClone(), ["ok"] = true, ["result"] = result };
                 }
                 catch (Exception e)
                 {
                     var inner = e is System.Reflection.TargetInvocationException t && t.InnerException != null ? t.InnerException : e;
-                    reply = new JsonObject { ["id"] = id, ["ok"] = false, ["error"] = inner.GetType().Name + ": " + inner.Message, ["trace"] = Trim(inner.StackTrace) };
+                    reply = new JsonObject { ["id"] = id?.DeepClone(), ["ok"] = false, ["error"] = inner.GetType().Name + ": " + inner.Message, ["trace"] = Trim(inner.StackTrace) };
                 }
                 stdout.WriteLine(reply.ToJsonString());
             }
