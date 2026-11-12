@@ -522,11 +522,16 @@ class LiveConn:
         self.buf = b''
         self.lock = threading.Lock()
         self.seq = 0
+        # The plugin remembers request ids for the whole launch and refuses a reused id with a new body, so ids carry a per-connection tag.
+        self.tag = os.urandom(3).hex()
         self.pending = []
 
     def send(self, obj):
-        self.proc.stdin.write((json.dumps(obj, separators=(',', ':')) + '\n').encode())
-        self.proc.stdin.flush()
+        try:
+            self.proc.stdin.write((json.dumps(obj, separators=(',', ':')) + '\n').encode())
+            self.proc.stdin.flush()
+        except BrokenPipeError:
+            raise ToolError('test-control connection lost (the endpoint takes one client; another one may have connected); call live_connect again')
 
     def read_line(self, deadline):
         import select
@@ -548,7 +553,7 @@ class LiveConn:
     def request(self, cmd, args, wait=15.0, until=None):
         with self.lock:
             self.seq += 1
-            rid = 'mcp-%d' % self.seq
+            rid = 'mcp-%s-%d' % (self.tag, self.seq)
             req = {'v': 1, 'id': rid, 'cmd': cmd}
             req.update(args or {})
             self.send(req)
